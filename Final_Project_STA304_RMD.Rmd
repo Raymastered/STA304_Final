@@ -1,0 +1,597 @@
+---
+title: "Analyzing the Dangers of Gacha Monetization Systems by Statistical Simulation on Rate of Success"
+author: "Ruize Liu (1003320499)"
+date: "December 21st, 2020"
+output:
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(broom)
+```
+
+## Keywords
+Logarithmic, Regression, Success, Investment, Spending, Promotion, Roll, Rate, Pity, Guarantee, Gambler's Fallacy, Predatory System
+
+
+## Introduction
+With the advent of smartphones and increased accessibility across mobile services, there has been a prominent surge of applications that make money off of mobile entertainment. In the gaming genre, one such sub-genre that rose to popularity is gacha games. In contrast to normal games that monetize its consumers with a singular purchase or with a subscription based service, gacha games are typically free to download and try from the get go. 
+
+However, the main monetization strategy comes from the popularized gacha system, where a user must spend currency to sample from a pool of available items, with a fixed or dynamically increasing chance of getting that particular item. Additionally, many systems require players to receive duplicates of a specific item in order to enhance some aspect of the item, meaning on average, an extremely high amount of samples are needed to maximally obtain one item.
+
+However, a growing concern has been the predatory nature of the gacha system and that it would become the norm on the mobile market, due to the absurd profit margins that a successful gacha game has been able to generate. To analyze the source of the concerns and to what extent it is detrimental to the average user, a simulation will be conducted across multiple gacha games before to find correlations between user time investment, user spending, and the likelihood that they will succeed at a particular goal. 
+
+Based on the distribution of people that succeed and their parameters, conclusions can be formed about which gacha systems are the most predatory, what the average investment needed is to succeed for a specific goal, and if there are underlying patterns that indicate gacha systems are rightfully criticized.
+
+In this study, four different gacha games will be considered, all with somewhat different systems in place. For terminology, we will be referring to certain aspects of a gacha game as such:
+
+```{r Term_table, echo=FALSE}
+term_title <- c("Roll", "Rate", "Pity", "5star")
+term_desc <- c("[To perform a single sampling of the gacha pool of items]", "[The likelihood of receiving an item (often of the highest tier) from a roll]", "[Typically a sub-system where after a certain amount of rolls without receiving a specific item, the rate of rolling that item or its entire tier of items increases by a fixed amount or dynamically]", "[A generic group which is typically the highest tier of items that can be obtained from the gacha pool, usually with the lowest rate and what pity sytems are designed for]")
+term_tbl <- tibble(term_title,term_desc)
+names(term_tbl)[1]<-"Term"
+names(term_tbl)[2]<-"Description"
+knitr::kable(term_tbl)
+```
+
+And, for the four games, the following titles will be analyzed:
+
+[**Fate Grand/Order, Azur Lane, Grandblue Fantasy, Genshin Impact**]
+
+These four were chosen specifically as all of them have been extremely successful financially. This most accurately represents the model, since not only does it indicate a sizeable audience that is willing to spend, but also that perhaps many of them are spending far too much. Interestingly enough, there are different systems in place for each gacha for the rate and pity systems, yet all of them have found some way of being very successful.
+
+```{r Rate_table, echo=FALSE}
+rate_game <- c("Fate Grand Order", "Azur Lane", "Grandblue Fantasy", "Genshin Impact")
+rate_base <- c("1.0%", "7.0%", "6.0%", "0.6%")
+rate_spec <- c("0.7%", "2.0%", "0.3%", "0.3%")
+rate_pity <- c("None", "None", "Guaranteed specific item in 300 rolls", "Rate ramps up after the 75th roll, at 90 rolls, guaranteed random item of the highest tier, at 180 rolls, guaranteed specific item")
+rate_tbl <- tibble(rate_game,rate_base,rate_spec,rate_pity)
+names(rate_tbl)[1]<-"Title"
+names(rate_tbl)[2]<-"Base Rate"
+names(rate_tbl)[3]<-"Specific Item Rate"
+names(rate_tbl)[4]<-"Pity System"
+knitr::kable(rate_tbl)
+```
+
+
+## Data and Model
+
+The dataset will be a simulated set of 100 000 users, which will be used independently for each of the four titles we're simulating on.
+
+The first input will be time investment. Typically, gacha games will give free currency when the user completes certain tasks in playing the game. However, this is not linear as the amount of currency is very high initially, but drops off after a certain amount of time passes and options to get currency become exhausted. As such, I will be sampling the currency output of time investment from a logarithmic distribution, which is an approximation based on a few factors.
+
+The exact logarithmic formula used to scale time investment vs. currency gained will be $$ y = 20ln(x) + 10 $$
+So for example, a player that's played 20 hours will have gained 69.9 rolls, and a player with 40 hours will have gained 83.8 rolls.
+
+This is certainly an approximation, but it's a decent model considering it's very difficult to gauge the exact number, due to the differences between efficiency of users. However, the two main similarities across all four games is that they all start new users off with 10 rolls, and after exhausting the main and side components of the game, the user will typically have gained around 100 rolls, but not much more. Thus, the logarithm curve becomes very prevalent past the 100 point with this formula.
+
+Additionally, please note that the random time investment will actually be skewed towards the lower end. This is because typically speaking, a large portion of the players don't have the time to play the game a lot, so most people will end up with less than a few dozen hours in total. There are certainly players with hundreds of hours too, but they're in the vast minority. Here are the ranges and probabilities for this distribution:
+
+```{r Time_Investment_table, echo=FALSE}
+TI_type <- c("Low Time Investor", "Medium Time Investor", "High Time Investor")
+TI_range <- c("1-20", "2-50", "50-200")
+TI_prob <- c("70%", "20%", "10%")
+TI_tbl <- tibble(TI_type,TI_range,TI_prob)
+names(TI_tbl)[1]<-"Type"
+names(TI_tbl)[2]<-"Time Range Sampled From (h)"
+names(TI_tbl)[3]<-"Probability Of Assignment"
+knitr::kable(TI_tbl)
+```
+
+The second input will be spender type. This, for the most part, will be the most significant parameter for determining how much currency a user possesses. this will be categorized this into non-spender, low spender, medium spender, and high spender, each with a specific range of values that are applicable. A user of a particular spender type will then be randomly assigned a budget within the range of their constraints. However, it's important to note that this will not be uniformly distributed, but skewed towards the lower end as a tiny fraction of the high spenders typically bring in most of the game's income. The probabilities I will be using are overall an approximation based off of personal experience and the various user surveys posted amongst forums, such as the one here (1).
+
+```{r Spending_table, echo=FALSE}
+Spend_type <- c("Non Spender", "Low Spender", "Medium Spender", "High Spender")
+Spend_range <- c("0", "5-30", "30-200", "200-3000")
+Spend_prob <- c("42%", "42%", "15%", "1%")
+Spend_tbl <- tibble(Spend_type,Spend_range,Spend_prob)
+names(Spend_tbl)[1]<-"Type"
+names(Spend_tbl)[2]<-"Spending Range Sampled From ($)"
+names(Spend_tbl)[3]<-"Probability Of Assignment"
+knitr::kable(Spend_tbl)
+```
+
+Finally, a third input that will be used is promotional period. For gacha games, there are many promotional periods where a new user will receive a surge of currency compared to if they joined outside the period. For simplicity, this will be categorized as either non-promotional or promotional. All users that joined during a promotional period will have a fixed amount of additional currency.
+
+Using these input specifications, a simulation will be performed to generate the users, who will each have time spent, spender type, and promotional period. The output model that will be the focus of this study will be a binary outcome for 'success'. To define success, the main factor will be spender type, based largely off of anecdotal evidence for real life spenders of this genre. The exact parameters will be as follows:
+
+```{r Success_table, echo=FALSE}
+suc_title <- c("Non Spender", "Low Spender", "Medium Spender", "High Spender")
+suc_desc <- c("[Any 5 star tier item]", "[Any 5 star tier item]", "[A specific 5 star tier item]", "[5 total copies of a specific 5 star tier item, the average amount it takes to maximally obtain an item]")
+suc_tbl <- tibble(suc_title,suc_desc)
+names(suc_tbl)[1]<-"Type"
+names(suc_tbl)[2]<-"Success Definition"
+knitr::kable(suc_tbl)
+```
+
+Please note that this is ultimately a gross approximation, and in the real world, people will have very different goals regardless of how long they've played or how much they're willing to spend. However, based off public opinion from forums of these titles and my personal experience, this is a good approximation of the simulated model.
+
+The overall logarithmic model is thus:
+
+$$ ln(\frac{y}{1-y}) = \beta_0+\beta_1  x_{time} + \beta_2  x_{spendType} + \beta_3  x_{promo} + \epsilon$$
+
+
+## Results
+
+```{r Sample Inputs, echo=FALSE}
+# Total number of users to simulate:
+user_total = 100000
+
+# Seed to use, for easily reproducible results
+set.seed(122020)
+
+# This will assign each of the users to a time investment group, with most users being in 'Low'
+# The time ranges used for these groups are as follows:
+# Low:    1-20 hours
+# Medium: 20-50 hours
+# High:   50-200 hours
+time_group <- sample(c("Low", "Medium", "High"), user_total, replace=TRUE, prob=c(0.7,0.2,0.1))
+
+# Randomly assign a user a time investment between 1 and 150 hours
+time_investments <- rep(0, user_total)
+for (i in 1:length(time_group))
+{
+  if (time_group[i] == "High") {
+    time_investments[i] <- runif(1, 50, 200)
+  }
+  else if (time_group[i] == "Medium") {
+    time_investments[i] <- runif(1, 20, 50)
+  }
+  else if (time_group[i] == "Low") {
+    time_investments[i] <- runif(1, 1, 20)
+  }
+}
+
+# Currency they will receive will be based on logarithmic formula
+time_investment_currency <- rep(0, user_total)
+for (i in 1:length(time_investments))
+{
+  time_investment_currency[i] <- 20 * log(time_investments[i]) + 10
+}
+
+# Randomly assign a user a spender type, will scale slightly off of how much time they've spent
+# Note: The probabilities are based off personal knowledge and  user created surveys like the one at (1)
+# Typically, the vast majority of players are non-spenders or low-spenders, with some medium and high being extremely low
+spender_type <- sample(c("Non_Spender", "Low_Spender", "Medium_Spender", "High_Spender"), user_total, replace=TRUE,
+                       prob= c(0.42, 0.42, 0.15, 0.01))
+
+# For spending amount, it's the actual budget a user has, which is scaled off of their spending type
+# For reference, these are the parameters I will use:
+# Non-spender:    $0
+# Low-spender:    $5-$30
+# Medium-spender: $50-$200
+# High-spender:   $200-$3000
+
+# For spending currency, I'm going to be using an average rate of today's prices, which is roughly $30 CAD for ~10 rolls
+# Yeah, it's pretty expensive...
+spending_amount <- rep(0, user_total)
+spending_currency <- rep(0, user_total)
+for (i in 1:length(time_investments))
+{
+  if (spender_type[i] == "High_Spender") {
+    spending_amount[i] <- runif(1, 200, 3000)
+  }
+  else if (spender_type[i] == "Medium_Spender") {
+    spending_amount[i] <- runif(1, 30, 200)
+  }
+  else if (spender_type[i] == "Low_Spender") {
+    spending_amount[i] <- runif(1, 5, 30)
+  }
+  else {
+    spending_amount[i] <- 0
+  }
+  spending_currency[i] <- spending_amount[i]/3
+}
+
+# Finally, we'll have whether they joined during a promotional period or not. This will be a very simple simulation with a 50/50 split.
+promo_period <- sample(c("Yes", "No"), user_total, replace=TRUE)
+
+# Most promotion periods will give the player anywhere between 10 - 20 free rolls. We'll use 15 rolls as an average.
+promo_currency <- rep(0, user_total)
+for (i in 1:length(promo_currency))
+{
+  if (promo_period[i] == "Yes") {
+    promo_currency[i] <- 15
+  }
+  else {
+    promo_currency[i] <- 0
+  }
+}
+
+# Now we attach all the columns together for our dataset
+users.data <- 
+  tibble(time_investments, time_investment_currency, spender_type, spending_amount, spending_currency, promo_period, promo_currency)
+
+# Finally, we'll create a new column which calculates how many total rolls the user has, rounded down
+users.data <-
+  users.data %>% mutate(total_rolls = floor(time_investment_currency + spending_currency + promo_currency))
+
+# We can write this to a csv for reference
+write_csv(users.data, "final_user_data.csv")
+
+```
+
+
+Now that there is a simulated dataset for users, we can run the set of users through each of the 4 different gacha systems, and have an output column for the total number of 5 stars that were obtained, and also the number of times a specific 5 star was obtained.
+
+For FGO and Azur Lane, a simple simulation with sample() with specific probabilities is fine. However, for Grandblue and Genshin, additional code will be required to implement their pity systems. Additionally, for Genshin Impact, because the rate actually changes dynamically in the middle of the rolls, more factors will need to be accounted for. Specifically, the rate seems to increase at the 76th roll drastically to a staggering 20.6%, which then scales donwards at a gradual pace until 90 (2). The simulation will need to account for that, in additional to tracking if the system is reset before the 76th roll.
+
+```{r Fate_Grand_Order_Gacha_Simulation, echo=FALSE}
+fgo.data <- users.data
+
+five_stars_total <- rep(0, user_total)
+five_stars_specific <- rep(0, user_total)
+
+# Basically, since the rate is 1.0% for any 5 star and 0.7% for the specific 5 star, we'll randomly sample from 1 to 1000
+# Then, any result from 1 to 10 is a 5 star, and moreover, any result from 1 to 7 is the specific 5 star
+for (i in 1:nrow(fgo.data))
+{
+  total_counter = 0
+  specific_counter = 0
+  rolls_to_do = fgo.data[i,8]
+  
+  results <- sample(1000, as.integer(rolls_to_do), replace=TRUE)
+  
+  for (j in 1:length(results)) {
+    if (results[j] <= 7) {
+      specific_counter = specific_counter + 1
+    }
+    
+    if (results[j] <= 10) {
+      total_counter = total_counter + 1
+    }
+  }
+  five_stars_total[i] <- total_counter
+  five_stars_specific[i] <- specific_counter
+}
+
+fgo.data <- cbind(fgo.data, five_stars_total, five_stars_specific)
+
+# Now we'll create a new column for 'success', based on if they hit their goals or not
+fgo.data <- fgo.data %>%
+  mutate(
+    goal_met =
+      case_when(
+        spender_type == "High_Spender" & five_stars_specific >= 5 ~ 1,
+        spender_type == "Medium_Spender" & five_stars_specific >= 1 ~ 1,
+        spender_type == "Low_Spender" & five_stars_total >= 1 ~ 1,
+        spender_type == "Non_Spender" & five_stars_total >= 1 ~ 1,
+        TRUE ~ 0
+      )
+  )
+```
+
+```{r Azur_Lane_Gacha_Simulation, echo=FALSE}
+azur.data <- users.data
+
+five_stars_total <- rep(0, user_total)
+five_stars_specific <- rep(0, user_total)
+
+# Basically, since the rate is 7.0% for any 5 star and 2.0% for the specific 5 star, we'll randomly sample from 1 to 1000
+# Then, any result from 1 to 70 is a 5 star, and moreover, any result from 1 to 20 is the specific 5 star
+for (i in 1:nrow(azur.data))
+{
+  total_counter = 0
+  specific_counter = 0
+  rolls_to_do = azur.data[i,8]
+  
+  results <- sample(1000, as.integer(rolls_to_do), replace=TRUE)
+  
+  for (j in 1:length(results)) {
+    if (results[j] <= 20) {
+      specific_counter = specific_counter + 1
+    }
+    
+    if (results[j] <= 70) {
+      total_counter = total_counter + 1
+    }
+  }
+  five_stars_total[i] <- total_counter
+  five_stars_specific[i] <- specific_counter
+}
+
+azur.data <- cbind(azur.data, five_stars_total, five_stars_specific)
+
+azur.data <- azur.data %>%
+  mutate(
+    goal_met =
+      case_when(
+        spender_type == "High_Spender" & five_stars_specific >= 5 ~ 1,
+        spender_type == "Medium_Spender" & five_stars_specific >= 1 ~ 1,
+        spender_type == "Low_Spender" & five_stars_total >= 1 ~ 1,
+        spender_type == "Non_Spender" & five_stars_total >= 1 ~ 1,
+        TRUE ~ 0
+      )
+  )
+```
+
+```{r Grandblue_Fantasy_Gacha_Simulation, echo=FALSE}
+grandblue.data <- users.data
+
+five_stars_total <- rep(0, user_total)
+five_stars_specific <- rep(0, user_total)
+
+# Basically, since the rate is 6.0% for any 5 star and 0.3% for the specific 5 star, we'll randomly sample from 1 to 1000
+# Then, any result from 1 to 60 is a 5 star, and moreover, any result from 1 to 3 is the specific 5 star
+for (i in 1:nrow(grandblue.data))
+{
+  total_counter = 0
+  specific_counter = 0
+  rolls_to_do = grandblue.data[i,8]
+  
+  results <- sample(1000, as.integer(rolls_to_do), replace=TRUE)
+  
+  for (j in 1:length(results)) {
+    # Pity system, every 300th roll is the specific item, 100% of the time
+    if (j %% 300 == 0) {
+      specific_counter = specific_counter + 1
+      total_counter = total_counter + 1
+    }
+    else {
+      if (results[j] <= 3) {
+        specific_counter = specific_counter + 1
+      }
+      
+      if (results[j] <= 60) {
+        total_counter = total_counter + 1
+      }
+    }
+  }
+  five_stars_total[i] <- total_counter
+  five_stars_specific[i] <- specific_counter
+}
+
+grandblue.data <- cbind(grandblue.data, five_stars_total, five_stars_specific)
+
+# Note: Grandblue is a special case, because you don't need duplicates, a single item is actually the maximal amount
+# As such, we'll instead set high spender success to getting 3 specifics, as that is typically the number of items for a single pool that have increased rates (and thus is what a high spender would plausible aim for)
+grandblue.data <- grandblue.data %>%
+  mutate(
+    goal_met =
+      case_when(
+        spender_type == "High_Spender" & five_stars_specific >= 3 ~ 1,
+        spender_type == "Medium_Spender" & five_stars_specific >= 1 ~ 1,
+        spender_type == "Low_Spender" & five_stars_total >= 1 ~ 1,
+        spender_type == "Non_Spender" & five_stars_total >= 1 ~ 1,
+        TRUE ~ 0
+      )
+  )
+
+```
+
+```{r Genshin_Impact_Gacha_Simulation, echo=FALSE}
+genshin.data <- users.data
+
+five_stars_total <- rep(0, user_total)
+five_stars_specific <- rep(0, user_total)
+
+# Basically, since the rate is 6.0% for any 5 star and 0.3% for the specific 5 star, we'll randomly sample from 1 to 1000
+# Then, any result from 1 to 60 is a 5 star, and moreover, any result from 1 to 3 is the specific 5 star
+for (i in 1:nrow(genshin.data))
+{
+  # We will need a tracking counter for the rolls without a 5 star item
+  rolls_since_pity = 0
+  # These are the additional rate modifiers on the rate for rolls 76-84 (85-89 seems to be same or worse)
+  # Using the simulation rates, this is the % chance indicate minus 6 (i.e. new rate - 0.6%)
+  rate_mod_76_to_84 <- c(200, 133, 88, 58, 35, 23, 14, 7, 3)
+  specific_item_gurantee = 0
+  total_counter = 0
+  specific_counter = 0
+  rolls_to_do = genshin.data[i,8]
+  
+  results <- sample(1000, as.integer(rolls_to_do), replace=TRUE)
+  
+  for (j in 1:length(results)) {
+    if (rolls_since_pity == 90) {
+      # Pity system, every 180th roll without a 5 star item is the specific item, 100% of the time
+      if (specific_item_gurantee == 1) {
+        specific_counter = specific_counter + 1
+        total_counter = total_counter + 1
+        rolls_since_pity = 0
+        specific_item_gurantee = 0
+      }
+      # Pity system 2, every 90th roll without a 5 star item is a 5 star item, with a 50/50 chance if it's the specific item
+      else {
+        pity_result <- runif(1, 0, 1)
+        if (pity_result == 1) {
+          specific_counter = specific_counter + 1
+        }
+        else {
+          specific_item_gurantee = 1
+        }
+        total_counter = total_counter + 1
+        rolls_since_pity = 0
+      }
+    }
+    else {
+      rate_modifier = 0
+      if (rolls_since_pity >= 76 & rolls_since_pity <= 84) {
+        rate_modifier <- rate_mod_76_to_84[rolls_since_pity - 75] # On 76, this is +200, on 77, +133 etc.
+      }
+      
+      if (results[j] <= (3 + rate_modifier)) {
+        specific_counter = specific_counter + 1
+      }
+      
+      if (results[j] <= (6 + rate_modifier)) {
+        total_counter = total_counter + 1
+        rolls_since_pity = 0
+      }
+      rolls_since_pity = rolls_since_pity + 1
+    }
+  }
+  five_stars_total[i] <- total_counter
+  five_stars_specific[i] <- specific_counter
+}
+
+genshin.data <- cbind(genshin.data, five_stars_total, five_stars_specific)
+
+genshin.data <- genshin.data %>%
+  mutate(
+    goal_met =
+      case_when(
+        spender_type == "High_Spender" & five_stars_specific >= 5 ~ 1,
+        spender_type == "Medium_Spender" & five_stars_specific >= 1 ~ 1,
+        spender_type == "Low_Spender" & five_stars_total >= 1 ~ 1,
+        spender_type == "Non_Spender" & five_stars_total >= 1 ~ 1,
+        TRUE ~ 0
+      )
+  )
+
+```
+
+After computing the results, an aggregation of the output data for success can be performed. This can be represented as a comparison between each of the spender types, followed by an overall output comparison in the form of a bar graph.
+
+```{r Success_Bar_Graph_Comparison, echo=FALSE, warning=FALSE}
+fgo_non <- nrow(fgo.data %>% filter(spender_type == "Non_Spender" & goal_met == 1)) / nrow(fgo.data %>% filter(spender_type == "Non_Spender"))
+fgo_low <- nrow(fgo.data %>% filter(spender_type == "Low_Spender" & goal_met == 1)) / nrow(fgo.data %>% filter(spender_type == "Low_Spender"))
+fgo_med <- nrow(fgo.data %>% filter(spender_type == "Medium_Spender" & goal_met == 1)) / nrow(fgo.data %>% filter(spender_type == "Medium_Spender"))
+fgo_high <- nrow(fgo.data %>% filter(spender_type == "High_Spender" & goal_met == 1)) / nrow(fgo.data %>% filter(spender_type == "High_Spender"))
+fgo_overall <- nrow(fgo.data %>% filter(goal_met == 1)) / nrow(fgo.data)
+
+
+azur_non <- nrow(azur.data %>% filter(spender_type == "Non_Spender" & goal_met == 1)) / nrow(azur.data %>% filter(spender_type == "Non_Spender"))
+azur_low <- nrow(azur.data %>% filter(spender_type == "Low_Spender" & goal_met == 1)) / nrow(azur.data %>% filter(spender_type == "Low_Spender"))
+azur_med <- nrow(azur.data %>% filter(spender_type == "Medium_Spender" & goal_met == 1)) / nrow(azur.data %>% filter(spender_type == "Medium_Spender"))
+azur_high <- nrow(azur.data %>% filter(spender_type == "High_Spender" & goal_met == 1)) / nrow(azur.data %>% filter(spender_type == "High_Spender"))
+azur_overall <- nrow(azur.data %>% filter(goal_met == 1)) / nrow(azur.data)
+
+
+gb_non <- nrow(grandblue.data %>% filter(spender_type == "Non_Spender" & goal_met == 1)) / nrow(grandblue.data %>% filter(spender_type == "Non_Spender"))
+gb_low <- nrow(grandblue.data %>% filter(spender_type == "Low_Spender" & goal_met == 1)) / nrow(grandblue.data %>% filter(spender_type == "Low_Spender"))
+gb_med <- nrow(grandblue.data %>% filter(spender_type == "Medium_Spender" & goal_met == 1)) / nrow(grandblue.data %>% filter(spender_type == "Medium_Spender"))
+gb_high <- nrow(grandblue.data %>% filter(spender_type == "High_Spender" & goal_met == 1)) / nrow(grandblue.data %>% filter(spender_type == "High_Spender"))
+gb_overall <- nrow(grandblue.data %>% filter(goal_met == 1)) / nrow(grandblue.data)
+
+
+gen_non <- nrow(genshin.data %>% filter(spender_type == "Non_Spender" & goal_met == 1)) / nrow(genshin.data %>% filter(spender_type == "Non_Spender"))
+gen_low <- nrow(genshin.data %>% filter(spender_type == "Low_Spender" & goal_met == 1)) / nrow(genshin.data %>% filter(spender_type == "Low_Spender"))
+gen_med <- nrow(genshin.data %>% filter(spender_type == "Medium_Spender" & goal_met == 1)) / nrow(genshin.data %>% filter(spender_type == "Medium_Spender"))
+gen_high <- nrow(genshin.data %>% filter(spender_type == "High_Spender" & goal_met == 1)) / nrow(genshin.data %>% filter(spender_type == "High_Spender"))
+gen_overall <- nrow(genshin.data %>% filter(goal_met == 1)) / nrow(genshin.data)
+
+bar_df_id <- c(1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4,1,2,3,4)
+bar_df_groups <- c("Non-Spender", "Non-Spender", "Non-Spender", "Non-Spender",
+                  "Low-Spender", "Low-Spender", "Low-Spender", "Low-Spender",
+                  "Medium-Spender", "Medium-Spender", "Medium-Spender", "Medium-Spender",
+                  "High-Spender", "High-Spender", "High-Spender", "High-Spender", 
+                  "Overall", "Overall", "Overall", "Overall")
+bar_df_values <- c(fgo_non, azur_non, gb_non, gen_non, fgo_low, azur_low, gb_low, gen_low, fgo_med, azur_med, gb_med, gen_med,
+                 fgo_high, azur_high, gb_high, gen_high, fgo_overall, azur_overall, gb_overall, gen_overall)
+bar_df <- tibble(bar_df_id, bar_df_groups, bar_df_values)
+
+# Source for help: https://stackoverflow.com/questions/22305023/how-to-get-a-barplot-with-several-variables-side-by-side-grouped-by-a-factor
+library(ggplot2)
+ggplot(bar_df, aes(x=factor(bar_df_groups, level = c("Non-Spender", "Low-Spender", "Medium-Spender", "High-Spender", "Overall")), 
+           y=bar_df_values,fill=factor(bar_df_id))) +
+  geom_bar(stat="identity",position="dodge") +
+  scale_fill_discrete(name="Title", labels=c("Fate Grand/Order", "Azur Lane", "Grandblue Fantasy", "Genshin Impact")) +
+  scale_y_continuous(breaks = seq(0, 1, by=0.1)) +
+  ggtitle("Average chance of success by spender type") +
+  xlab("Spender Type") +
+  ylab("Chance of Success")
+
+```
+[Figure 1]
+
+Finally, the logarithmic regression model can be implemented to analyze how the inputs time, spending, and promo factor into the output of successfully reaching a respective goal. This yields the following models (base seems to be high spender + no promotion):
+
+Fate Grand/Order: $$ ln(\frac{y}{1-y}) = -0.7189+0.0084 * time + (0.3656 * Non + 0.4789 * low + 0.4602 * Med) + (0.2708 * Promo) + \epsilon$$
+```{r Success_Log_Regression_FGO, echo=FALSE, message=FALSE, warning=FALSE}
+fgo_model <- glm(goal_met ~ time_investments + as.factor(spender_type) + as.factor(promo_period),
+            data=fgo.data, family='binomial')
+fgo_tib <- tidy(coefficients(fgo_model))
+names(fgo_tib)[1] <- "Factor"
+names(fgo_tib)[2] <- "Value"
+knitr::kable(fgo_tib)
+```
+
+Azur Lane: $$ ln(\frac{y}{1-y}) = 0.9447+0.0410 * time + (2.0018 * Non + 2.4802 * low + 0.0233 * Med) + (0.6262 * Promo) + \epsilon$$
+```{r Success_Log_Regression_Azur, echo=FALSE, message=FALSE, warning=FALSE}
+azur_model <- glm(goal_met ~ time_investments + as.factor(spender_type) + as.factor(promo_period),
+            data=azur.data, family='binomial')
+azur_tib <- tidy(coefficients(azur_model))
+names(azur_tib)[1] <- "Factor"
+names(azur_tib)[2] <- "Value"
+knitr::kable(azur_tib)
+```
+
+Grandblue Fantasy: $$ ln(\frac{y}{1-y}) = -0.1669+0.0099 * time + (3.1173 * Non + 3.5394 * low - 1.3610 * Med) + (0.5050 * Promo) + \epsilon$$
+```{r Success_Log_Regression_GB, echo=FALSE, message=FALSE, warning=FALSE}
+gb_model <- glm(goal_met ~ time_investments + as.factor(spender_type) + as.factor(promo_period),
+            data=grandblue.data, family='binomial')
+gb_tib <- tidy(coefficients(gb_model))
+names(gb_tib)[1] <- "Factor"
+names(gb_tib)[2] <- "Value"
+knitr::kable(gb_tib)
+```
+
+Genshin Impact: $$ ln(\frac{y}{1-y}) = -1.2184+0.0522 * time + (-0.3143 * Non + 0.0247 * low - 0.1262 * Med) + (0.8155 * Promo) + \epsilon$$
+```{r Success_Log_Regression_Gen, echo=FALSE, message=FALSE, warning=FALSE}
+gen_model <- glm(goal_met ~ time_investments + as.factor(spender_type) + as.factor(promo_period),
+            data=genshin.data, family='binomial')
+gen_tib <- tidy(coefficients(gen_model))
+names(gen_tib)[1] <- "Factor"
+names(gen_tib)[2] <- "Value"
+knitr::kable(gen_tib)
+```
+
+For instance, a medium spending player in Fate Grand/Order who has 100 hours of playtime and joined during a promotional period will have the following average chance of successfully obtaining 1 copy of a specific item:
+$$ln(\frac{y}{1-y}) = -0.7189 + 0.084 * 100 + 0.4602 * 1 + 0.2708 * 1$$
+$$ln(\frac{y}{1-y}) = 0.84121$$
+$$y = 0.6987$$
+So, around a 70% chance of success.
+
+
+# Discussion
+
+## General Findings
+
+Overall, there are various similarities and differences between gacha titles, and between users of differing mentalities.
+
+Judging by the aggregate results under figure 1, it appears that users in the low spending category typically have the best chance of success, with the highest overall range across all titles, between 52-97%. Interestingly enough, medium spenders are the worse off overall, with a success chance ranging from a measly 27% to 87%. Comparing the specific systems of the games, it's exemplified by Azur Lane that having a high base rate, regardless of any pity systems, leads to the best overall user experience. 
+
+On the other hand, Fate Grand/Order and Genshin Impact have similar cumulative chances of success for the average user. However, it's apparent that Genshin Impact's system favors high spenders where as Fate Grand/Order is the opposite, having the lowest chance for high spenders whereas Genshin has the highest chance for high spenders. The main difference is the dynamic pity system of Genshin, which guarantees value after a set number of rolls. However, as both of these titles have very bad statistical rates of success across the board, it's a good indication that games with bad base rates are extremely predatory, regardless of pity systems that may be implemented.
+
+Furthermore, it can be seen that goals matter a lot depending on the in-game system. For Grandblue Fantasy, the medium spenders are performing by far the worst, because their goal of a specific item is ridiculously low compared to any item (0.3% chance vs 6.0% chance). This leads to interesting approximations of the model, where in the logistic regression formula, medium spending is the only category to have a negative modifier on success.
+
+## The Predatory Secrets of Gacha
+
+However, the biggest takeaway from the analysis is that for the most part, gachas are built with rates and systems so that it's extremely difficult to come close to an 100% chance of success relative to a player's investment. For instance, consider the highest spenders in the Fate Grand/Order simulation that did not meet their goals (shown below). Some users spent over $2900, and achieved not even 50% their projected goal. Statistically speaking, this level of failure is extremely rare. However, this user could feasibly exist in real life, and it would be absolutely tragic for them.
+
+```{r Example_High_Spender_Failure_FGO, echo=FALSE}
+high_spender_failure <-
+  fgo.data %>% filter(spender_type == "High_Spender" & goal_met == 0) %>% arrange(desc(spending_amount)) %>% select(spending_amount, total_rolls, five_stars_total, five_stars_specific, goal_met)
+knitr::kable(head(high_spender_failure))
+```
+
+## Impact and Consequences
+
+As such, these trends could certainly be an issue. The two worst offenders on the list, Fate Grand/Order and Genshin Impact, are projected to be the most profitable titles of not only this group, but of all grossing mobile games. Genshin Impact, since its release in September 2020, has grossed 250 million USD in its first month and over 400 million USD overall (3). Fate Grand/Order, on the other hand, has grossed in the hundreds of millions every year, hitting a peak of 1.2 billion USD in 2018 and a total of over 4 billion USD across its lifetime of 5 years (4).
+
+From the paper by Xiao L.Y. (5) on a study of loot box mechanics, a big reason of why these games perform so well is Gambler's Fallacy, a sub-categorization of Sunk Cost Fallacy where a user is encouraged to continue spending as to not waste the already obtained results of previous attempts. As seen from our analysis, the overall worst group in achieving their goals are the medium spenders. This is dangerous as many people in this category may be spurred on by this mentality, to spend more and climb into the high spender category. With a strong enough in-game incentive, it's easy to see how so many people can seemingly gamble thousands away for nothing of practical use.
+
+## Weaknesses and Conclusions
+
+However, it's important to take note of the weaknesses of this study as well. The most significant factor is that the output, chance of success, is based on a fixed approximation of what represents success. In reality, people have different goals that may not necessarily correlate to the parameters used in the study. An optimistic user may expect 2-3 specific items spending nothing, and a pessimistic user may be willing to spend hundreds for 1 copy of a specific item. It's really a case by case basis. While I believe the approximation I performed is a good indicator variable, an ideal replication of this study would perform this analysis on stratas of users who each have a similar goal and mentality.
+
+Additionally, another weakness is the small pool of titles used. There are hundreds of gacha titles out which each have different systems, rates, and a mentality its players will tend to have. It's possible that the titles I studied on happened to be the most predatory titles, but the average gacha is not actually too bad, similar to the success chances that Azur Lane produced. Thus, in another ideal reproduction, many more titles should be considered in addition to the four used here.
+
+Ultimately, gacha games have risen to fame and judging by the profits of the big titles, it won't be going away for a long time. From the study, it's shown that a low base rate is a strong indicator of predatory systems, and the best way to optimize success is to be a non/low-spender and aim for the baseline. It's important to keep this in mind delving into this genre, or there could be serious consequences in the long run.
+
+
+## References
+(1) https://www.reddit.com/r/Genshin_Impact/comments/jyj2a8/poll_how_much_money_have_you_currently_spent_on/
+
+(2) https://www.reddit.com/r/Genshin_Impact/comments/jo9d9d/the_5_rate_is_not_uniform_06_there_is_a_soft_pity/
+
+(3) Chapple C., "Genshin Impact Hits Nearly $250 Million in Its First Month, Making It One of the Largest Mobile Game Launches Ever", Oct 28, 2020, [Retrieved from: https://sensortower.com/blog/genshin-impact-first-month-revenue]
+
+(4) Chapple C., "Fate/Grand Order Surpasses $4 Billion After Becoming Japan’s Top Grossing Mobile Game of 2019", Jan 30, 2020, [Retrieved from: https://sensortower.com/blog/fate-grand-order-revenue-4-billion]
+
+(5) Xiao L. Y., "Online Gambling in Video Games: A Case Study on the Regulation of Loot Boxes", 10.13140. Nov 2018. [Retrieved from: https://www.researchgate.net/publication/333673812_Online_Gambling_in_Video_Games_A_Case_Study_on_the_Regulation_of_Loot_Boxes]
+
+
